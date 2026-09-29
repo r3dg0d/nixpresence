@@ -92,6 +92,11 @@ fn lookup(key: &str, state: &State, cfg: &Config) -> String {
         "uptime" => state.uptime.clone().unwrap_or_default(),
         "nixos_version" => state.nixos_version.clone().unwrap_or_default(),
         "profile" => state.active_profile.clone(),
+        "time" | "local_time" => state.local_time.clone().unwrap_or_default(),
+        "location" => state.location.clone().unwrap_or_default(),
+        "weather" => state.weather.clone().unwrap_or_default(),
+        "weather_temp" | "temp" => state.weather_temp.clone().unwrap_or_default(),
+        "weather_condition" => state.weather_condition.clone().unwrap_or_default(),
         "vrchat" => {
             if state.vrchat_running {
                 "VRChat".into()

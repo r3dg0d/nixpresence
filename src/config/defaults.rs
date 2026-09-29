@@ -27,7 +27,7 @@ pause_on_custom = true
 
 # Pages are composed via templates. Tokens: {os} {kernel} {cpu} {cpu_short}
 # {ram} {gpu} {gpu_name} {gpu_temp} {gpu_util} {music} {artist} {title}
-# {custom} {hostname} {uptime} …
+# {custom} {hostname} {uptime} {time} {location} {weather} {temp} …
 # Optional sections: {?music: …} only expands when music is non-empty.
 
 [[pages]]
@@ -35,6 +35,24 @@ name = "status"
 enabled = true
 template = "{custom}{?music: ┆ 🎵 {music}}"
 priority = 10
+
+[[pages]]
+name = "discord_add"
+enabled = true
+template = "Add me on discord: vincentonpc"
+priority = 15
+
+[[pages]]
+name = "music"
+enabled = true
+template = "🎵 {music}"
+priority = 20
+
+[[pages]]
+name = "local"
+enabled = true
+template = "{time} ┆ {location}{?weather: ┆ {weather}}"
+priority = 25
 
 [[pages]]
 name = "system"
@@ -48,17 +66,11 @@ enabled = true
 template = "{gpu} ┆ {gpu_temp}°C ┆ {gpu_util}%"
 priority = 50
 
-[[pages]]
-name = "music"
-enabled = true
-template = "🎵 {music}"
-priority = 20
-
 [profiles.default]
-pages = ["status", "system", "gpu", "music"]
+pages = ["status", "discord_add", "music", "local", "system", "gpu"]
 
 [profiles.vrchat]
-pages = ["status", "music", "system"]
+pages = ["status", "discord_add", "music", "local", "system"]
 [profiles.vrchat.rotation]
 mode = "round_robin"
 interval_secs = 8.0
@@ -104,13 +116,26 @@ serve_local_art = false     # keep false until Discord is verified to accept 127
 # small_image = ""          # optional fixed override (HTTPS or portal key)
 # small_text = ""
 [discord.assets.map]
-vrchat = "vrchat"
-kopuz = "kopuz"
-equibop = "equibop"
-default = "nixpresence"
-# firefox = "https://cdn.simpleicons.org/firefox/FF7139"
-# chrome = "https://cdn.simpleicons.org/googlechrome/4285F4"
-# steam = "https://cdn.simpleicons.org/steam/ffffff"
+# Built-in defaults are merged on load; override any key with HTTPS (preferred)
+# or a portal asset key (set prefer_https = false if you rely on uploaded keys).
+firefox = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/firefox.png"
+chrome = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png"
+helium = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png"
+brave-browser = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/brave.png"
+steam = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/steam.png"
+discord = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png"
+equibop = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png"
+vesktop = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png"
+code = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vscode.png"
+cursor = "https://cdn.simpleicons.org/cursor/ffffff"
+ghostty = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ghostty.png"
+kitty = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png"
+thunar = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/files.png"
+mpv = "https://cdn.simpleicons.org/mpv/ffffff"
+obs = "https://cdn.simpleicons.org/obsstudio/302E31"
+vrchat = "https://cdn.simpleicons.org/vrchat/ffffff"
+kopuz = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/spotify.png"
+default = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nixos.png"
 
 [music]
 enabled = true
@@ -130,11 +155,33 @@ kopuz = true
 vrchat = true
 focused_app = true
 custom = true
+location = true
+time = true
+weather = true
 
 [custom]
 message = ""
 rotate = ["NixOS enjoyer", "compiled with love", "reproducible vibes"]
 rotate_secs = 30.0
+
+# User-requested location (not auto-detected). Off by default for privacy.
+[location]
+enabled = false
+text = ""
+latitude = 0.0
+longitude = 0.0
+
+[time]
+enabled = true
+timezone = "America/Los_Angeles"
+format = "%-I:%M %p %Z"
+
+# Open-Meteo forecast (uses [location] lat/lon). Off until coords set.
+[weather]
+enabled = false
+provider = "open_meteo"
+cache_secs = 600.0
+units = "fahrenheit"
 
 [hardware]
 nvml = true

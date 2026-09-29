@@ -1,6 +1,6 @@
 # nixpresence
 
-NixOS-friendly **VRChat chatbox** compositor + optional **Discord Rich Presence** daemon.
+NixOS-friendly **VRChat chatbox** compositor + optional **Discord Rich Presence (HTTPS app badges / focused window)** daemon.
 
 Independent **MIT** implementation inspired by the *ideas* behind MagicChatBox — **not** a port
 of that proprietary codebase. Music comes from **MPRIS** (Kopuz preferred by name); Kopuz gRPC
@@ -49,3 +49,9 @@ export NIXPRESENCE_DISCORD_APP_ID=your_id   # for tests
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+
+## Chatbox pages (defaults)
+
+Rotating pages include status/custom, Discord add-me, music, **local** (`{time}` + `{location}` + `{weather}` via Open-Meteo), system (`{cpu_short}` …), and GPU.
+Location/weather are opt-in in config (`[location]` / `[weather]`) so privacy defaults stay safe.

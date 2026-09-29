@@ -17,6 +17,9 @@ pub struct Config {
     pub music: MusicConfig,
     pub modules: ModulesConfig,
     pub custom: CustomConfig,
+    pub location: LocationConfig,
+    pub time: TimeConfig,
+    pub weather: WeatherConfig,
     pub hardware: HardwareConfig,
     pub ipc: IpcConfig,
     pub logging: LoggingConfig,
@@ -36,6 +39,9 @@ impl Default for Config {
             music: MusicConfig::default(),
             modules: ModulesConfig::default(),
             custom: CustomConfig::default(),
+            location: LocationConfig::default(),
+            time: TimeConfig::default(),
+            weather: WeatherConfig::default(),
             hardware: HardwareConfig::default(),
             ipc: IpcConfig::default(),
             logging: LoggingConfig::default(),
@@ -50,6 +56,20 @@ fn default_pages() -> Vec<PageConfig> {
             enabled: true,
             template: "{custom}{?music: ┆ 🎵 {music}}".into(),
             priority: 10,
+            interval_secs: None,
+        },
+        PageConfig {
+            name: "discord_add".into(),
+            enabled: true,
+            template: "Add me on discord: vincentonpc".into(),
+            priority: 15,
+            interval_secs: None,
+        },
+        PageConfig {
+            name: "local".into(),
+            enabled: true,
+            template: "{time} ┆ {location}{?weather: ┆ {weather}}".into(),
+            priority: 25,
             interval_secs: None,
         },
         PageConfig {
@@ -83,9 +103,11 @@ fn default_profiles() -> HashMap<String, ProfileConfig> {
         ProfileConfig {
             pages: vec![
                 "status".into(),
+                "discord_add".into(),
+                "music".into(),
+                "local".into(),
                 "system".into(),
                 "gpu".into(),
-                "music".into(),
             ],
             rotation: None,
         },
@@ -93,7 +115,13 @@ fn default_profiles() -> HashMap<String, ProfileConfig> {
     m.insert(
         "vrchat".into(),
         ProfileConfig {
-            pages: vec!["status".into(), "music".into(), "system".into()],
+            pages: vec![
+                "status".into(),
+                "discord_add".into(),
+                "music".into(),
+                "local".into(),
+                "system".into(),
+            ],
             rotation: Some(RotationConfig {
                 mode: RotationMode::RoundRobin,
                 interval_secs: 8.0,
@@ -277,66 +305,179 @@ pub struct DiscordAssetsConfig {
     pub map: HashMap<String, String>,
 }
 
-fn default_asset_map() -> HashMap<String, String> {
+pub(crate) fn default_discord_asset_map() -> HashMap<String, String> {
+    // Prefer public HTTPS PNGs (Homarr dashboard-icons / Simple Icons).
+    // Portal keys alone show nothing unless uploaded in the Developer Portal.
     let mut m = HashMap::new();
-    // Portal keys (upload in Developer Portal) — override with HTTPS in config if desired.
-    m.insert("vrchat".into(), "vrchat".into());
-    m.insert("kopuz".into(), "kopuz".into());
-    m.insert("equibop".into(), "equibop".into());
-    m.insert("default".into(), "nixpresence".into());
-    // Common focused-app classes → public HTTPS icons (Simple Icons CDN).
-    m.insert(
-        "firefox".into(),
-        "https://cdn.simpleicons.org/firefox/FF7139".into(),
-    );
-    m.insert(
-        "firefox-esr".into(),
-        "https://cdn.simpleicons.org/firefox/FF7139".into(),
-    );
-    m.insert(
-        "chrome".into(),
-        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
-    );
-    m.insert(
-        "google-chrome".into(),
-        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
-    );
-    m.insert(
-        "chromium".into(),
-        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
-    );
-    m.insert(
-        "brave-browser".into(),
-        "https://cdn.simpleicons.org/brave/FB542B".into(),
-    );
-    m.insert(
-        "steam".into(),
-        "https://cdn.simpleicons.org/steam/ffffff".into(),
-    );
-    m.insert(
-        "spotify".into(),
-        "https://cdn.simpleicons.org/spotify/1DB954".into(),
-    );
-    m.insert(
-        "code".into(),
-        "https://cdn.simpleicons.org/visualstudiocode/007ACC".into(),
-    );
-    m.insert(
-        "code-url-handler".into(),
-        "https://cdn.simpleicons.org/visualstudiocode/007ACC".into(),
-    );
-    m.insert(
-        "discord".into(),
-        "https://cdn.simpleicons.org/discord/5865F2".into(),
-    );
-    m.insert(
-        "vesktop".into(),
-        "https://cdn.simpleicons.org/discord/5865F2".into(),
-    );
-    m.insert(
-        "helium".into(),
-        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
-    );
+    let entries: &[(&str, &str)] = &[
+        // Fallback / brand
+        (
+            "default",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nixos.png",
+        ),
+        (
+            "nixpresence",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nixos.png",
+        ),
+        (
+            "nixos",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nixos.png",
+        ),
+        ("vrchat", "https://cdn.simpleicons.org/vrchat/ffffff"),
+        (
+            "kopuz",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/spotify.png",
+        ),
+        (
+            "equibop",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png",
+        ),
+        (
+            "vesktop",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png",
+        ),
+        (
+            "discord",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/discord.png",
+        ),
+        // Browsers
+        (
+            "firefox",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/firefox.png",
+        ),
+        (
+            "firefox-esr",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/firefox.png",
+        ),
+        (
+            "chrome",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png",
+        ),
+        (
+            "google-chrome",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png",
+        ),
+        (
+            "chromium",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png",
+        ),
+        (
+            "brave",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/brave.png",
+        ),
+        (
+            "brave-browser",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/brave.png",
+        ),
+        (
+            "helium",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-chrome.png",
+        ),
+        // Gaming / media
+        (
+            "steam",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/steam.png",
+        ),
+        (
+            "spotify",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/spotify.png",
+        ),
+        ("mpv", "https://cdn.simpleicons.org/mpv/ffffff"),
+        ("obs", "https://cdn.simpleicons.org/obsstudio/302E31"),
+        (
+            "com.obsproject.Studio",
+            "https://cdn.simpleicons.org/obsstudio/302E31",
+        ),
+        // Editors / IDEs
+        (
+            "code",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vscode.png",
+        ),
+        (
+            "code-url-handler",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vscode.png",
+        ),
+        (
+            "code-oss",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vscode.png",
+        ),
+        ("codium", "https://cdn.simpleicons.org/vscodium/2F80ED"),
+        ("vscodium", "https://cdn.simpleicons.org/vscodium/2F80ED"),
+        ("cursor", "https://cdn.simpleicons.org/cursor/ffffff"),
+        (
+            "cursor-url-handler",
+            "https://cdn.simpleicons.org/cursor/ffffff",
+        ),
+        // Terminals / file managers
+        (
+            "kitty",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+        ),
+        (
+            "ghostty",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ghostty.png",
+        ),
+        (
+            "com.mitchellh.ghostty",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ghostty.png",
+        ),
+        (
+            "alacritty",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/alacritty.png",
+        ),
+        (
+            "wezterm",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+        ),
+        (
+            "org.wezfurlong.wezterm",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+        ),
+        (
+            "foot",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+        ),
+        (
+            "thunar",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/files.png",
+        ),
+        (
+            "org.gnome.Nautilus",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/files.png",
+        ),
+        (
+            "org.gnome.TextEditor",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/code.png",
+        ),
+        (
+            "org.kde.dolphin",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/files.png",
+        ),
+        (
+            "dolphin",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/files.png",
+        ),
+        // Mail / misc
+        (
+            "thunderbird",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/thunderbird.png",
+        ),
+        (
+            "org.mozilla.Thunderbird",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/thunderbird.png",
+        ),
+        (
+            "neovim",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/neovim.png",
+        ),
+        (
+            "nvim",
+            "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/neovim.png",
+        ),
+    ];
+    for (k, v) in entries {
+        m.insert((*k).into(), (*v).into());
+    }
     m
 }
 
@@ -349,7 +490,7 @@ impl Default for DiscordAssetsConfig {
             small_text: None,
             prefer_https: true,
             serve_local_art: false,
-            map: default_asset_map(),
+            map: default_discord_asset_map(),
         }
     }
 }
@@ -448,6 +589,9 @@ pub struct ModulesConfig {
     pub vrchat: bool,
     pub focused_app: bool,
     pub custom: bool,
+    pub location: bool,
+    pub time: bool,
+    pub weather: bool,
 }
 
 impl Default for ModulesConfig {
@@ -463,6 +607,9 @@ impl Default for ModulesConfig {
             vrchat: true,
             focused_app: true,
             custom: true,
+            location: true,
+            time: true,
+            weather: true,
         }
     }
 }
@@ -485,6 +632,71 @@ impl Default for CustomConfig {
                 "reproducible vibes".into(),
             ],
             rotate_secs: 30.0,
+        }
+    }
+}
+
+/// User-requested location label (not auto-detected). Privacy: only shown if enabled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocationConfig {
+    pub enabled: bool,
+    /// Display text, e.g. "Palm Desert, CA".
+    pub text: String,
+    /// WGS84 coords for Open-Meteo (optional; 0,0 = weather skipped).
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+impl Default for LocationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            text: String::new(),
+            latitude: 0.0,
+            longitude: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TimeConfig {
+    pub enabled: bool,
+    /// IANA timezone, e.g. America/Los_Angeles.
+    pub timezone: String,
+    /// chrono strftime (uses chrono-tz for %Z → PST/PDT).
+    pub format: String,
+}
+
+impl Default for TimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timezone: "America/Los_Angeles".into(),
+            format: "%-I:%M %p %Z".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WeatherConfig {
+    pub enabled: bool,
+    /// open_meteo (default).
+    pub provider: String,
+    pub cache_secs: f64,
+    /// fahrenheit | celsius
+    pub units: String,
+}
+
+impl Default for WeatherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: "open_meteo".into(),
+            cache_secs: 600.0,
+            units: "fahrenheit".into(),
         }
     }
 }

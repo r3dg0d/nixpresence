@@ -4,11 +4,13 @@ pub mod focused;
 pub mod hardware;
 pub mod kernel;
 pub mod kopuz;
+pub mod meta;
 pub mod mpris;
 pub mod network;
 pub mod nixos;
 pub mod system;
 pub mod vrchat;
+pub mod weather;
 
 use crate::config::Config;
 use std::time::{Duration, Instant, SystemTime};
@@ -40,6 +42,14 @@ pub struct State {
     /// Focused window class (Hyprland / X11), e.g. `firefox`, `steam`.
     pub focused_app: Option<String>,
     pub focused_title: Option<String>,
+    /// Local time string (timezone from config).
+    pub local_time: Option<String>,
+    /// Configured location label (user-requested).
+    pub location: Option<String>,
+    /// Cached weather line, e.g. "72°F Clear".
+    pub weather: Option<String>,
+    pub weather_temp: Option<String>,
+    pub weather_condition: Option<String>,
     pub custom_override: Option<String>,
     pub custom_rotate_idx: usize,
     pub custom_rotate_at: Option<Instant>,
@@ -97,6 +107,8 @@ pub struct ProviderHub {
     pub vrchat: vrchat::VrchatProvider,
     pub focused: focused::FocusedAppProvider,
     pub custom: custom::CustomProvider,
+    pub meta: meta::MetaProvider,
+    pub weather: weather::WeatherProvider,
 }
 
 impl ProviderHub {
@@ -112,6 +124,8 @@ impl ProviderHub {
             vrchat: vrchat::VrchatProvider::new(),
             focused: focused::FocusedAppProvider::new(),
             custom: custom::CustomProvider::new(),
+            meta: meta::MetaProvider::new(),
+            weather: weather::WeatherProvider::new(),
         }
     }
 
@@ -139,6 +153,10 @@ impl ProviderHub {
         }
         if cfg.modules.custom {
             self.custom.refresh(cfg, state);
+        }
+        self.meta.refresh(cfg, state);
+        if cfg.modules.weather {
+            self.weather.refresh(cfg, state);
         }
 
         // Music: MPRIS primary; Kopuz gRPC best-effort only.

@@ -5,9 +5,35 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
+/// User `[discord.assets.map]` replaces the whole HashMap on deserialize.
+/// Re-fill missing keys from built-in HTTPS defaults so a short portal-key
+/// snippet does not wipe firefox/chrome/… badges.
+pub(crate) fn merge_discord_asset_defaults(cfg: &mut Config) {
+    let prefer_https = cfg.discord.assets.prefer_https;
+    for (k, v) in super::schema::default_discord_asset_map() {
+        match cfg.discord.assets.map.get(&k).map(|s| s.trim().to_string()) {
+            None => {
+                cfg.discord.assets.map.insert(k, v);
+            }
+            Some(existing)
+                if prefer_https
+                    && !existing.starts_with("https://")
+                    && !existing.starts_with("http://")
+                    && v.starts_with("https://") =>
+            {
+                // Bare portal keys show nothing unless uploaded — prefer built-in HTTPS.
+                cfg.discord.assets.map.insert(k, v);
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn load_config(path: &Path) -> Result<Config> {
     let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let cfg: Config = toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+    let mut cfg: Config =
+        toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+    merge_discord_asset_defaults(&mut cfg);
     Ok(cfg)
 }
 
@@ -82,6 +108,24 @@ pub fn effective_discord_app_id(cfg: &Config) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_map_keeps_https_defaults() {
+        let toml = r#"
+[discord.assets]
+large_image = "nixos"
+[discord.assets.map]
+vrchat = "vrchat"
+default = "nixpresence"
+"#;
+        let mut cfg: Config = toml::from_str(toml).expect("parse");
+        merge_discord_asset_defaults(&mut cfg);
+        let ff = cfg.discord.assets.map.get("firefox").expect("firefox");
+        assert!(ff.starts_with("https://"), "got {ff}");
+        // Bare portal key upgraded to HTTPS when prefer_https (default true)
+        let vr = cfg.discord.assets.map.get("vrchat").expect("vrchat");
+        assert!(vr.starts_with("https://"), "got {vr}");
+    }
 
     #[test]
     fn default_parses() {

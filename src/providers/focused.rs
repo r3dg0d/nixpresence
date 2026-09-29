@@ -28,13 +28,63 @@ impl FocusedAppProvider {
     }
 }
 
+/// Resolve a tool that systemd units often miss (minimal PATH).
+fn resolve_bin(name: &str) -> Option<std::path::PathBuf> {
+    // Absolute / relative path as given
+    let as_path = std::path::Path::new(name);
+    if as_path.is_absolute() && as_path.is_file() {
+        return Some(as_path.to_path_buf());
+    }
+    // PATH lookup
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(':').filter(|s| !s.is_empty()) {
+            let candidate = std::path::Path::new(dir).join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    // NixOS / common fallbacks (user systemd often strips PATH)
+    for dir in ["/run/current-system/sw/bin", "/usr/bin", "/bin"] {
+        let candidate = std::path::Path::new(dir).join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let local = std::path::Path::new(&home).join(".local/bin").join(name);
+        if local.is_file() {
+            return Some(local);
+        }
+        // /etc/profiles/per-user/<user>/bin
+        if let Some(user) = std::path::Path::new(&home).file_name() {
+            let prof = std::path::Path::new("/etc/profiles/per-user")
+                .join(user)
+                .join("bin")
+                .join(name);
+            if prof.is_file() {
+                return Some(prof);
+            }
+        }
+    }
+    None
+}
+
 /// Run a binary with a clean dynamic linker env so NixOS system tools
 /// (hyprctl) are not broken by cargo/dev LD_LIBRARY_PATH pollution.
 fn run_clean(bin: &str, args: &[&str]) -> Option<String> {
-    let mut cmd = Command::new(bin);
+    let Some(path) = resolve_bin(bin) else {
+        debug!(
+            bin,
+            "focused-app binary not found on PATH or NixOS fallbacks"
+        );
+        return None;
+    };
+    let mut cmd = Command::new(&path);
     cmd.args(args);
     cmd.env_remove("LD_LIBRARY_PATH");
     cmd.env_remove("LD_PRELOAD");
+    // Ensure hyprland socket vars survive even if somehow cleared
     match cmd.output() {
         Ok(out) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();

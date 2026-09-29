@@ -43,8 +43,12 @@ pub fn short_cpu_name(raw: &str) -> String {
     }
     let parts: Vec<_> = s.split_whitespace().collect();
     let mut out = parts.join(" ");
-    out = out.replace("Intel Core ", "i");
+    // Model strings already contain "i9-" / "i7-" — strip the vendor prefix only.
+    // Replacing "Intel Core " with "i" produced the bug "ii9-14900k".
+    out = out.replace("Intel Core ", "");
+    out = out.replace("Intel ", "");
     out = out.replace("AMD Ryzen ", "R");
+    out = out.replace("AMD ", "");
     out = out.replace("Apple ", "");
     out.trim().to_string()
 }
@@ -61,8 +65,18 @@ mod tests {
     }
 
     #[test]
-    fn short_cpu() {
-        let s = short_cpu_name("Intel(R) Core(TM) i9-13900K CPU @ 3.00GHz");
-        assert!(s.contains('i') || s.contains("13900"), "got {s}");
+    fn short_cpu_intel_no_double_i() {
+        let s = short_cpu_name("Intel(R) Core(TM) i9-14900K CPU @ 3.20GHz");
+        assert_eq!(s, "i9-14900K");
+        let s2 = short_cpu_name("Intel(R) Core(TM) i9-13900K CPU @ 3.00GHz");
+        assert_eq!(s2, "i9-13900K");
+        assert!(!s.contains("ii"), "double-i regression: {s}");
+    }
+
+    #[test]
+    fn short_cpu_amd_ryzen() {
+        let s = short_cpu_name("AMD Ryzen 9 7950X 16-Core Processor");
+        assert!(s.starts_with('R'), "got {s}");
+        assert!(s.contains("7950"), "got {s}");
     }
 }

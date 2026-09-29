@@ -48,10 +48,9 @@ serve_local_art = false
 
 | Logical key / class | Suggested value                         | When shown                                      |
 |---------------------|-----------------------------------------|-------------------------------------------------|
-| `vrchat`            | portal key or HTTPS                     | VRChat process / focused class                  |
-| `kopuz`             | portal key or HTTPS                     | Preferred music player (when we own music RP)   |
-| `firefox` / `chrome` / `steam` / … | HTTPS (Simple Icons defaults) | Focused Wayland/X11 window class           |
-| `nixpresence`       | portal key `default`                    | Fallback small image                            |
+| `vrchat` / `firefox` / `chrome` / `helium` / `steam` / … | HTTPS CDN PNG/SVG (Homarr / Simple Icons) | Focused Wayland/X11 window class |
+| `equibop` / `vesktop` / `discord` | Discord HTTPS icon | Discord clients |
+| `default`           | NixOS HTTPS icon                        | Fallback small image                            |
 
 Small-image resolution order (see `src/outputs/discord.rs`):
 
@@ -66,3 +65,8 @@ Small-image resolution order (see `src/outputs/discord.rs`):
 6. `map.default` — omit small image if unset/empty
 
 Missing keys simply fail to render that image in Discord; presence text still works.
+
+A short `[discord.assets.map]` in user config used to **replace** the whole default map
+(wiping HTTPS browser icons). nixpresence now **merges** built-in HTTPS defaults under
+user keys, and upgrades bare portal keys to HTTPS when `prefer_https = true`.
+Dedup includes `large_image` / `small_image` so focus changes republish badges.

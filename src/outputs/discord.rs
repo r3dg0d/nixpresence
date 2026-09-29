@@ -167,6 +167,14 @@ impl DiscordOutput {
 
         match client.set_activity(act) {
             Ok(()) => {
+                debug!(
+                    details = %details,
+                    state = %state_s,
+                    large_image = %large,
+                    small_image = %small,
+                    focused = ?state.focused_app,
+                    "Discord presence published"
+                );
                 self.last_details = details;
                 self.last_state = state_s;
                 self.last_large = large;
@@ -378,9 +386,10 @@ fn map_get_resolved(
     if let Some(url) = normalize_image_ref(&raw, prefer_https, false) {
         return Some(url);
     }
-    // Portal asset key
-    if prefer_https && is_https_url(&raw) {
-        return Some(raw);
+    // Bare portal key: keep only when prefer_https is false (user uploaded assets).
+    if prefer_https {
+        debug!(key = %raw, logical, "omitting non-HTTPS discord asset (prefer_https)");
+        return None;
     }
     Some(raw)
 }
@@ -392,19 +401,57 @@ fn resolve_app_asset(
 ) -> Option<String> {
     let normalized = normalize_class_key(class);
     let lower = class.to_lowercase();
-    // Direct class / normalized lookup
-    for candidate in [class, normalized.as_str(), lower.as_str()] {
+    let variants = class_lookup_variants(class);
+    // Direct class / normalized / variant lookup
+    for candidate in std::iter::once(class)
+        .chain(std::iter::once(normalized.as_str()))
+        .chain(std::iter::once(lower.as_str()))
+        .chain(variants.iter().map(String::as_str))
+    {
         if let Some(v) = map_get_resolved(map, candidate, prefer_https) {
-            return Some(v);
+            return accept_image_ref(&v, prefer_https);
         }
     }
     // Aliases: VRChat, browsers, steam, …
     for alias in class_aliases(class) {
         if let Some(v) = map_get_resolved(map, alias, prefer_https) {
-            return Some(v);
+            return accept_image_ref(&v, prefer_https);
+        }
+    }
+    // Freedesktop .desktop Icon= → map / omit (never emit dead local paths)
+    if let Some(icon) = desktop_icon_name(class) {
+        if let Some(v) = map_get_resolved(map, &icon, prefer_https) {
+            return accept_image_ref(&v, prefer_https);
+        }
+        for alias in class_aliases(&icon) {
+            if let Some(v) = map_get_resolved(map, alias, prefer_https) {
+                return accept_image_ref(&v, prefer_https);
+            }
         }
     }
     None
+}
+
+/// When `prefer_https`, skip bare portal keys that Discord will not render
+/// unless the user uploaded them — omit rather than show a blank badge.
+/// Explicit `https://` values always pass. Portal keys pass only when
+/// `prefer_https` is false.
+fn accept_image_ref(raw: &str, prefer_https: bool) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if is_https_url(t) || t.starts_with("http://") {
+        return Some(t.to_string());
+    }
+    if prefer_https {
+        debug!(
+            key = t,
+            "skipping non-HTTPS discord asset key (prefer_https)"
+        );
+        return None;
+    }
+    Some(t.to_string())
 }
 
 fn class_aliases(class: &str) -> Vec<&'static str> {
@@ -416,15 +463,15 @@ fn class_aliases(class: &str) -> Vec<&'static str> {
     if c.contains("firefox") {
         out.push("firefox");
     }
-    if c.contains("chrom") || c == "google-chrome" || c == "brave-browser" || c == "helium" {
-        if c.contains("brave") {
-            out.push("brave-browser");
-        } else if c == "helium" {
-            out.push("helium");
-            out.push("chrome");
-        } else {
-            out.push("chrome");
-        }
+    if c.contains("brave") {
+        out.push("brave-browser");
+        out.push("brave");
+    } else if c == "helium" || c.contains("helium") {
+        out.push("helium");
+        out.push("chrome");
+    } else if c.contains("chrom") || c == "google-chrome" || c.contains("chrome-") {
+        out.push("chrome");
+        out.push("chromium");
     }
     if c.contains("steam") {
         out.push("steam");
@@ -432,30 +479,183 @@ fn class_aliases(class: &str) -> Vec<&'static str> {
     if c.contains("spotif") {
         out.push("spotify");
     }
-    if c == "code" || c.contains("code-url") || c.contains("codium") {
+    if c.contains("cursor") {
+        out.push("cursor");
+    } else if c == "code"
+        || c.contains("code-url")
+        || c.contains("codium")
+        || c.contains("code-oss")
+    {
         out.push("code");
     }
-    if c.contains("discord") || c.contains("vesktop") || c.contains("equibop") {
-        if c.contains("equibop") {
-            out.push("equibop");
-        } else if c.contains("vesktop") {
-            out.push("vesktop");
-        } else {
-            out.push("discord");
+    if c.contains("equibop") {
+        out.push("equibop");
+        out.push("discord");
+    } else if c.contains("vesktop") {
+        out.push("vesktop");
+        out.push("discord");
+    } else if c.contains("discord") {
+        out.push("discord");
+    }
+    if c.contains("ghostty") {
+        out.push("ghostty");
+    }
+    if c.contains("kitty") {
+        out.push("kitty");
+    }
+    if c.contains("alacritty") {
+        out.push("alacritty");
+    }
+    if c.contains("wezterm") {
+        out.push("wezterm");
+    }
+    if c.contains("thunar") {
+        out.push("thunar");
+    }
+    if c.contains("nautilus") {
+        out.push("org.gnome.Nautilus");
+    }
+    if c.contains("dolphin") {
+        out.push("dolphin");
+    }
+    if c == "mpv" || c.ends_with(".mpv") || c.contains("mpv") {
+        out.push("mpv");
+    }
+    if c.contains("obs") {
+        out.push("obs");
+    }
+    if c.contains("thunderbird") {
+        out.push("thunderbird");
+    }
+    if c.contains("texteditor") || c.contains("text-editor") {
+        out.push("org.gnome.TextEditor");
+    }
+    if c.contains("nvim") || c.contains("neovim") {
+        out.push("neovim");
+    }
+    if c.contains("kopuz") {
+        out.push("kopuz");
+    }
+    out
+}
+
+/// Extra lookup keys: strip `.desktop`, reverse-DNS last component, chrome PWA quirks.
+fn class_lookup_variants(class: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let trimmed = class.trim();
+    let lower = trimmed.to_lowercase();
+    let no_desktop = lower
+        .strip_suffix(".desktop")
+        .unwrap_or(lower.as_str())
+        .to_string();
+    if no_desktop != lower {
+        out.push(no_desktop.clone());
+    }
+    // org.gnome.TextEditor → TextEditor / texteditor
+    if let Some(last) = no_desktop.rsplit('.').next() {
+        if last.len() != no_desktop.len() {
+            out.push(last.to_string());
         }
+    }
+    // chrome-chatgpt.com__-Default → chrome
+    if no_desktop.starts_with("chrome-") || no_desktop.starts_with("chromium-") {
+        out.push("chrome".into());
     }
     out
 }
 
 fn normalize_class_key(class: &str) -> String {
-    class
-        .trim()
-        .to_lowercase()
-        .chars()
+    let mut s = class.trim().to_lowercase();
+    if let Some(stripped) = s.strip_suffix(".desktop") {
+        s = stripped.to_string();
+    }
+    s.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>()
         .trim_matches('_')
         .to_string()
+}
+
+/// Best-effort: read `Icon=` from a matching freedesktop `.desktop` file.
+fn desktop_icon_name(class: &str) -> Option<String> {
+    let class_l = class.trim().to_lowercase();
+    let class_nd = class_l.strip_suffix(".desktop").unwrap_or(&class_l);
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        dirs.push(std::path::PathBuf::from(xdg).join("applications"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        dirs.push(std::path::PathBuf::from(home).join(".local/share/applications"));
+    }
+    if let Ok(xdg_dirs) = std::env::var("XDG_DATA_DIRS") {
+        for d in xdg_dirs.split(':').filter(|s| !s.is_empty()) {
+            dirs.push(std::path::PathBuf::from(d).join("applications"));
+        }
+    }
+    dirs.push("/usr/share/applications".into());
+    dirs.push("/run/current-system/sw/share/applications".into());
+
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        // Exact class.desktop
+        let exact = dir.join(format!("{class}.desktop"));
+        if let Some(icon) = read_desktop_icon(&exact) {
+            return Some(icon);
+        }
+        let exact_l = dir.join(format!("{class_nd}.desktop"));
+        if exact_l != exact {
+            if let Some(icon) = read_desktop_icon(&exact_l) {
+                return Some(icon);
+            }
+        }
+        // Scan for StartupWMClass / Name match (capped)
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut checked = 0usize;
+        for ent in rd.flatten() {
+            checked += 1;
+            if checked > 400 {
+                break;
+            }
+            let p = ent.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                continue;
+            }
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if stem == class_nd || stem.ends_with(&format!(".{class_nd}")) {
+                if let Some(icon) = read_desktop_icon(&p) {
+                    return Some(icon);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn read_desktop_icon(path: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Icon=") {
+            let icon = rest.trim();
+            if icon.is_empty() {
+                continue;
+            }
+            // Absolute / relative file paths are not usable without loopback serve.
+            if icon.starts_with('/') || icon.starts_with('.') {
+                return None;
+            }
+            return Some(icon.to_string());
+        }
+    }
+    None
 }
 
 fn map_get_for_player(
@@ -664,7 +864,11 @@ mod tests {
             ..State::default()
         };
         let (key, text) = resolve_small_asset(&cfg, &state, true, false);
-        assert_eq!(key, "vrchat");
+        assert!(key.starts_with("https://"), "got {key}");
+        assert!(
+            key.contains("vrchat") || key.contains("simpleicons"),
+            "got {key}"
+        );
         assert_eq!(text, "VRChat");
     }
 
@@ -676,7 +880,7 @@ mod tests {
             ..State::default()
         };
         let (key, text) = resolve_small_asset(&cfg, &state, true, false);
-        assert_eq!(key, "kopuz");
+        assert!(key.starts_with("https://"), "got {key}");
         assert_eq!(text, "Kopuz");
     }
 
@@ -685,7 +889,8 @@ mod tests {
         let cfg = cfg_with_assets();
         let state = State::default();
         let (key, text) = resolve_small_asset(&cfg, &state, false, false);
-        assert_eq!(key, "nixpresence");
+        assert!(key.starts_with("https://"), "got {key}");
+        assert!(key.contains("nixos"), "got {key}");
         assert_eq!(text, "nixpresence");
     }
 
@@ -730,6 +935,36 @@ mod tests {
             normalize_player_key(" org.mpris.MediaPlayer2.kopuz "),
             "org_mpris_mediaplayer2_kopuz"
         );
+    }
+
+    #[test]
+    fn normalize_class_strips_desktop() {
+        assert_eq!(normalize_class_key("Firefox.desktop"), "firefox");
+        assert_eq!(
+            normalize_class_key("org.gnome.TextEditor"),
+            "org_gnome_texteditor"
+        );
+    }
+
+    #[test]
+    fn aliases_cover_helium_and_chrome_pwa() {
+        assert!(class_aliases("helium").contains(&"chrome"));
+        assert!(class_aliases("chrome-chatgpt.com__-Default").contains(&"chrome"));
+        assert!(class_aliases("equibop").contains(&"discord"));
+        assert!(class_aliases("com.mitchellh.ghostty").contains(&"ghostty"));
+    }
+
+    #[test]
+    fn small_resolves_helium_to_https() {
+        let cfg = cfg_with_assets();
+        let state = State {
+            focused_app: Some("helium".into()),
+            focused_title: Some("New Tab".into()),
+            ..State::default()
+        };
+        let (key, text) = resolve_small_asset(&cfg, &state, false, false);
+        assert!(key.starts_with("https://"), "got {key}");
+        assert_eq!(text, "New Tab");
     }
 
     #[test]
