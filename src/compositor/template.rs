@@ -131,10 +131,12 @@ mod tests {
     #[test]
     fn basic_tokens() {
         let cfg = Config::default();
-        let mut st = State::default();
-        st.os_pretty = Some("NixOS".into());
-        st.artist = Some("A".into());
-        st.title = Some("B".into());
+        let mut st = State {
+            os_pretty: Some("NixOS".into()),
+            artist: Some("A".into()),
+            title: Some("B".into()),
+            ..State::default()
+        };
         assert_eq!(render_template("{os}", &st, &cfg), "NixOS");
         assert_eq!(
             render_template("x{?music: 🎵 {music}}y", &st, &cfg),
@@ -148,8 +150,10 @@ mod tests {
     #[test]
     fn truncate_filter() {
         let cfg = Config::default();
-        let mut st = State::default();
-        st.custom_override = Some("abcdefghijklmnop".into());
+        let st = State {
+            custom_override: Some("abcdefghijklmnop".into()),
+            ..State::default()
+        };
         let out = render_template("{custom|truncate:6}", &st, &cfg);
         assert_eq!(crate::util::grapheme_len(&out), 6);
     }

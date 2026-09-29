@@ -36,6 +36,11 @@ Create **your own** Discord Application ID.
 **Never** use Kopuz’s id `1470087339639443658`.  
 Default `[discord.music] mode = "coexist"` — do not fight Kopuz/arrpc music presence.
 
+Rich Presence images use **asset keys** (or HTTPS URLs) from
+`[discord.assets]`. Upload art under Developer Portal → your Application →
+**Rich Presence → Art Assets**. Ship a NixOS snowflake as key `nixos`
+(see [`assets/discord/`](./assets/discord/)).
+
 ```bash
 export NIXPRESENCE_DISCORD_APP_ID=your_id   # for tests
 ```

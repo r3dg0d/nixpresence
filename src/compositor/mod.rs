@@ -142,11 +142,13 @@ mod tests {
     #[test]
     fn compose_round_robin() {
         let cfg = Config::default();
-        let mut state = State::default();
-        state.os_pretty = Some("NixOS".into());
-        state.kernel = Some("7.2.8".into());
-        state.cpu_short = Some("i9-13900K".into());
-        state.ram = Some("32G".into());
+        let state = State {
+            os_pretty: Some("NixOS".into()),
+            kernel: Some("7.2.8".into()),
+            cpu_short: Some("i9-13900K".into()),
+            ram: Some("32G".into()),
+            ..State::default()
+        };
         let mut c = Compositor::new();
         let out = c.compose(&cfg, &state);
         assert!(!out.is_empty() || true); // may be custom rotate page

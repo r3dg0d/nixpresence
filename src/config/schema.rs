@@ -247,6 +247,48 @@ impl Default for OscConfig {
     }
 }
 
+/// Discord Rich Presence art assets.
+///
+/// `large_image` / `small_image` must be **asset keys** uploaded in the Discord
+/// Developer Portal (Application → Rich Presence → Art Assets), or HTTPS image
+/// URLs (supported by the `discord-rich-presence` crate).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscordAssetsConfig {
+    /// Large image asset key (default: NixOS snowflake key `nixos`).
+    pub large_image: String,
+    /// Tooltip for the large image.
+    pub large_text: String,
+    /// Optional fixed small-image override (skips VRChat / player resolution).
+    pub small_image: Option<String>,
+    /// Optional tooltip for the small image.
+    pub small_text: Option<String>,
+    /// Logical name → Discord asset key. Used when resolving the small image.
+    /// Keys: `vrchat`, `kopuz`, `equibop`, `default`, or a normalized player name.
+    pub map: HashMap<String, String>,
+}
+
+fn default_asset_map() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert("vrchat".into(), "vrchat".into());
+    m.insert("kopuz".into(), "kopuz".into());
+    m.insert("equibop".into(), "equibop".into());
+    m.insert("default".into(), "nixpresence".into());
+    m
+}
+
+impl Default for DiscordAssetsConfig {
+    fn default() -> Self {
+        Self {
+            large_image: "nixos".into(),
+            large_text: "NixOS".into(),
+            small_image: None,
+            small_text: None,
+            map: default_asset_map(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DiscordConfig {
@@ -258,6 +300,7 @@ pub struct DiscordConfig {
     pub details_template: String,
     pub state_template: String,
     pub music: DiscordMusicConfig,
+    pub assets: DiscordAssetsConfig,
 }
 
 impl Default for DiscordConfig {
@@ -268,6 +311,7 @@ impl Default for DiscordConfig {
             details_template: "{custom}".into(),
             state_template: "{os} · {gpu_name}".into(),
             music: DiscordMusicConfig::default(),
+            assets: DiscordAssetsConfig::default(),
         }
     }
 }

@@ -139,10 +139,12 @@ mod privacy_tests {
                 }),
             },
         );
-        let mut st = State::default();
-        st.active_profile = "default".into();
-        st.hostname = Some("zionsec".into());
-        st.os_pretty = Some("NixOS".into());
+        let st = State {
+            active_profile: "default".into(),
+            hostname: Some("zionsec".into()),
+            os_pretty: Some("NixOS".into()),
+            ..State::default()
+        };
         // hostname token returns empty when hidden
         let rendered = render_template("host={hostname}", &st, &cfg);
         assert_eq!(rendered, "host=");

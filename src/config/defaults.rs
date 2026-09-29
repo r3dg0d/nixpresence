@@ -93,6 +93,20 @@ state_template = "{os} · {gpu_name}"
 mode = "coexist"
 prefer_players = ["Kopuz", "kopuz"]
 
+# Rich Presence art assets. Keys must be uploaded in the Discord Developer Portal
+# (Application → Rich Presence → Art Assets), or be HTTPS image URLs.
+# See assets/discord/README.md for the NixOS snowflake PNG to upload as `nixos`.
+[discord.assets]
+large_image = "nixos"
+large_text = "NixOS"
+# small_image = ""          # optional fixed override (skips VRChat / player resolution)
+# small_text = ""
+[discord.assets.map]
+vrchat = "vrchat"
+kopuz = "kopuz"
+equibop = "equibop"
+default = "nixpresence"
+
 [music]
 enabled = true
 prefer_kopuz = true
