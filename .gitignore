@@ -1,0 +1,11 @@
+/target/
+/result
+/result-*
+*.swp
+*.bak
+.direnv/
+.envrc.local
+/.idea/
+/.vscode/
+*.log
+/config.local.toml
