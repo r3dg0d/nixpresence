@@ -1,0 +1,16 @@
+[Unit]
+Description=nixpresence VRChat chatbox + Discord presence
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nixpresence daemon
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+# NVML on NixOS
+Environment=LD_LIBRARY_PATH=/run/opengl-driver/lib
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=nixpresence
+Comment=VRChat chatbox + Discord presence for NixOS
+Exec=nixpresence tui
+Icon=applications-games
+Terminal=true
+Type=Application
+Categories=Utility;Game;
+Keywords=vrchat;osc;discord;nixos;
