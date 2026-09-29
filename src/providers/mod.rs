@@ -1,5 +1,6 @@
 //! Data providers → shared State.
 pub mod custom;
+pub mod focused;
 pub mod hardware;
 pub mod kernel;
 pub mod kopuz;
@@ -33,7 +34,12 @@ pub struct State {
     pub title: Option<String>,
     pub album: Option<String>,
     pub player: Option<String>,
+    /// MPRIS `mpris:artUrl` (https / http / file).
+    pub art_url: Option<String>,
     pub music_playing: bool,
+    /// Focused window class (Hyprland / X11), e.g. `firefox`, `steam`.
+    pub focused_app: Option<String>,
+    pub focused_title: Option<String>,
     pub custom_override: Option<String>,
     pub custom_rotate_idx: usize,
     pub custom_rotate_at: Option<Instant>,
@@ -89,6 +95,7 @@ pub struct ProviderHub {
     pub mpris: mpris::MprisProvider,
     pub kopuz: kopuz::KopuzProvider,
     pub vrchat: vrchat::VrchatProvider,
+    pub focused: focused::FocusedAppProvider,
     pub custom: custom::CustomProvider,
 }
 
@@ -103,6 +110,7 @@ impl ProviderHub {
             mpris: mpris::MprisProvider::new(),
             kopuz: kopuz::KopuzProvider::new(cfg),
             vrchat: vrchat::VrchatProvider::new(),
+            focused: focused::FocusedAppProvider::new(),
             custom: custom::CustomProvider::new(),
         }
     }
@@ -126,11 +134,20 @@ impl ProviderHub {
         if cfg.modules.vrchat {
             self.vrchat.refresh(state);
         }
+        if cfg.modules.focused_app {
+            self.focused.refresh(state);
+        }
         if cfg.modules.custom {
             self.custom.refresh(cfg, state);
         }
 
         // Music: MPRIS primary; Kopuz gRPC best-effort only.
+        state.artist = None;
+        state.title = None;
+        state.album = None;
+        state.player = None;
+        state.art_url = None;
+        state.music_playing = false;
         state.kopuz_socket_present = self.kopuz.socket_present();
         let mut got_music = false;
         if cfg.modules.kopuz && cfg.music.prefer_kopuz {

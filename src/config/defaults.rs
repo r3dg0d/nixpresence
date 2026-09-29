@@ -93,19 +93,24 @@ state_template = "{os} · {gpu_name}"
 mode = "coexist"
 prefer_players = ["Kopuz", "kopuz"]
 
-# Rich Presence art assets. Keys must be uploaded in the Discord Developer Portal
-# (Application → Rich Presence → Art Assets), or be HTTPS image URLs.
-# See assets/discord/README.md for the NixOS snowflake PNG to upload as `nixos`.
+# Rich Presence art: HTTPS URLs preferred; portal asset keys also work.
+# See assets/discord/README.md (NixOS snowflake PNG → upload as key `nixos`).
+# Localhost / file:// art is skipped by default (Discord CDN cannot fetch loopback).
 [discord.assets]
-large_image = "nixos"
+large_image = "nixos"       # or https://… URL
 large_text = "NixOS"
-# small_image = ""          # optional fixed override (skips VRChat / player resolution)
+prefer_https = true
+serve_local_art = false     # keep false until Discord is verified to accept 127.0.0.1
+# small_image = ""          # optional fixed override (HTTPS or portal key)
 # small_text = ""
 [discord.assets.map]
 vrchat = "vrchat"
 kopuz = "kopuz"
 equibop = "equibop"
 default = "nixpresence"
+# firefox = "https://cdn.simpleicons.org/firefox/FF7139"
+# chrome = "https://cdn.simpleicons.org/googlechrome/4285F4"
+# steam = "https://cdn.simpleicons.org/steam/ffffff"
 
 [music]
 enabled = true
@@ -123,6 +128,7 @@ network = false
 mpris = true
 kopuz = true
 vrchat = true
+focused_app = true
 custom = true
 
 [custom]

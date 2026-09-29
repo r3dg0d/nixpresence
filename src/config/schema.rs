@@ -249,31 +249,94 @@ impl Default for OscConfig {
 
 /// Discord Rich Presence art assets.
 ///
-/// `large_image` / `small_image` must be **asset keys** uploaded in the Discord
-/// Developer Portal (Application → Rich Presence → Art Assets), or HTTPS image
-/// URLs (supported by the `discord-rich-presence` crate).
+/// `large_image` / `small_image` may be **asset keys** uploaded in the Discord
+/// Developer Portal (Application → Rich Presence → Art Assets), or **HTTPS**
+/// image URLs (preferred when `prefer_https` is true). The
+/// `discord-rich-presence` crate accepts both.
+///
+/// Localhost / `file://` art is generally **not** fetchable by Discord's CDN.
+/// `serve_local_art` stays off until verified; see `assets/discord/README.md`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DiscordAssetsConfig {
-    /// Large image asset key (default: NixOS snowflake key `nixos`).
+    /// Large image: HTTPS URL (preferred) or portal asset key (default `nixos`).
     pub large_image: String,
     /// Tooltip for the large image.
     pub large_text: String,
-    /// Optional fixed small-image override (skips VRChat / player resolution).
+    /// Optional fixed small-image override (skips dynamic resolution).
     pub small_image: Option<String>,
     /// Optional tooltip for the small image.
     pub small_text: Option<String>,
-    /// Logical name → Discord asset key. Used when resolving the small image.
-    /// Keys: `vrchat`, `kopuz`, `equibop`, `default`, or a normalized player name.
+    /// Prefer HTTPS URLs over portal keys when a value looks like `https://`.
+    pub prefer_https: bool,
+    /// Serve local `file://` / icon bytes on `127.0.0.1` (default **false** —
+    /// Discord typically cannot fetch loopback from their CDN path).
+    pub serve_local_art: bool,
+    /// Logical name / window class → Discord asset key **or** HTTPS URL.
+    /// Keys: `vrchat`, `kopuz`, `firefox`, `chrome`, `steam`, `default`, …
     pub map: HashMap<String, String>,
 }
 
 fn default_asset_map() -> HashMap<String, String> {
     let mut m = HashMap::new();
+    // Portal keys (upload in Developer Portal) — override with HTTPS in config if desired.
     m.insert("vrchat".into(), "vrchat".into());
     m.insert("kopuz".into(), "kopuz".into());
     m.insert("equibop".into(), "equibop".into());
     m.insert("default".into(), "nixpresence".into());
+    // Common focused-app classes → public HTTPS icons (Simple Icons CDN).
+    m.insert(
+        "firefox".into(),
+        "https://cdn.simpleicons.org/firefox/FF7139".into(),
+    );
+    m.insert(
+        "firefox-esr".into(),
+        "https://cdn.simpleicons.org/firefox/FF7139".into(),
+    );
+    m.insert(
+        "chrome".into(),
+        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
+    );
+    m.insert(
+        "google-chrome".into(),
+        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
+    );
+    m.insert(
+        "chromium".into(),
+        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
+    );
+    m.insert(
+        "brave-browser".into(),
+        "https://cdn.simpleicons.org/brave/FB542B".into(),
+    );
+    m.insert(
+        "steam".into(),
+        "https://cdn.simpleicons.org/steam/ffffff".into(),
+    );
+    m.insert(
+        "spotify".into(),
+        "https://cdn.simpleicons.org/spotify/1DB954".into(),
+    );
+    m.insert(
+        "code".into(),
+        "https://cdn.simpleicons.org/visualstudiocode/007ACC".into(),
+    );
+    m.insert(
+        "code-url-handler".into(),
+        "https://cdn.simpleicons.org/visualstudiocode/007ACC".into(),
+    );
+    m.insert(
+        "discord".into(),
+        "https://cdn.simpleicons.org/discord/5865F2".into(),
+    );
+    m.insert(
+        "vesktop".into(),
+        "https://cdn.simpleicons.org/discord/5865F2".into(),
+    );
+    m.insert(
+        "helium".into(),
+        "https://cdn.simpleicons.org/googlechrome/4285F4".into(),
+    );
     m
 }
 
@@ -284,6 +347,8 @@ impl Default for DiscordAssetsConfig {
             large_text: "NixOS".into(),
             small_image: None,
             small_text: None,
+            prefer_https: true,
+            serve_local_art: false,
             map: default_asset_map(),
         }
     }
@@ -381,6 +446,7 @@ pub struct ModulesConfig {
     pub mpris: bool,
     pub kopuz: bool,
     pub vrchat: bool,
+    pub focused_app: bool,
     pub custom: bool,
 }
 
@@ -395,6 +461,7 @@ impl Default for ModulesConfig {
             mpris: true,
             kopuz: true,
             vrchat: true,
+            focused_app: true,
             custom: true,
         }
     }

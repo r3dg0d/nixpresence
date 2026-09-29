@@ -82,6 +82,7 @@ impl MprisProvider {
             let title = meta_str(&meta, "xesam:title");
             let artist = meta_artists(&meta);
             let album = meta_str(&meta, "xesam:album");
+            let art_url = meta_str(&meta, "mpris:artUrl");
             if title.is_none() && artist.is_none() {
                 continue;
             }
@@ -98,6 +99,7 @@ impl MprisProvider {
                 state.title = title;
                 state.artist = artist;
                 state.album = album;
+                state.art_url = art_url;
                 state.player = Some(short_name);
                 state.music_playing = playing;
                 if playing {

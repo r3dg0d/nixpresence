@@ -1,10 +1,12 @@
 //! Discord Rich Presence via discord-rich-presence.
 //! Never uses Kopuz's application id. Music mode defaults to coexist.
 //!
-//! Art assets (`large_image` / `small_image`) are Discord Application asset keys
-//! (or HTTPS URLs — both are accepted by the crate). Upload keys in the Developer
-//! Portal → Rich Presence → Art Assets for application id configured in
-//! `[discord].application_id`.
+//! Art assets (`large_image` / `small_image`) accept Discord Application asset
+//! keys **or** HTTPS URLs. Prefer HTTPS when `prefer_https` is set and a value
+//! looks like `https://`. Localhost / `file://` art is skipped by default
+//! (Discord's CDN generally cannot fetch loopback).
+//! Upload keys in Developer Portal → Rich Presence → Art Assets for the
+//! application id in `[discord].application_id`.
 use crate::config::load::effective_discord_app_id;
 use crate::config::{Config, DiscordMusicMode};
 use crate::providers::State;
@@ -85,6 +87,11 @@ impl DiscordOutput {
 
         let music_active = state.artist.is_some() || state.title.is_some();
         let prefer = self.preferred_player_active(cfg, state);
+        // Coexist + preferred player: leave music RP to Kopuz (etc.), but still
+        // publish non-music presence including focused-app small_image.
+        let defer_music_rp =
+            matches!(cfg.discord.music.mode, DiscordMusicMode::Coexist) && prefer && music_active;
+
         match cfg.discord.music.mode {
             DiscordMusicMode::Coexist if prefer && music_active => {
                 debug!("discord.music=coexist; preferred player owns music RPC");
@@ -99,10 +106,7 @@ impl DiscordOutput {
         let details = render_simple(&cfg.discord.details_template, state, composed, cfg);
         let state_s = render_simple(&cfg.discord.state_template, state, composed, cfg);
 
-        let (details, state_s) = if matches!(cfg.discord.music.mode, DiscordMusicMode::Coexist)
-            && prefer
-            && music_active
-        {
+        let (details, state_s) = if defer_music_rp {
             let d = if looks_like_music(&details, state) {
                 composed_without_music(composed, state).unwrap_or_else(|| state.custom_text(cfg))
             } else {
@@ -118,9 +122,9 @@ impl DiscordOutput {
             (details, state_s)
         };
 
-        let large = cfg.discord.assets.large_image.trim().to_string();
+        let large = resolve_large_asset(cfg);
         let large_text = cfg.discord.assets.large_text.trim().to_string();
-        let (small, small_text) = resolve_small_asset(cfg, state, prefer);
+        let (small, small_text) = resolve_small_asset(cfg, state, prefer, defer_music_rp);
 
         if details == self.last_details
             && state_s == self.last_state
@@ -185,19 +189,43 @@ impl DiscordOutput {
     }
 }
 
-/// Resolve small-image asset key + tooltip.
+/// Large image: configured HTTPS URL (preferred) or portal asset key.
+fn resolve_large_asset(cfg: &Config) -> String {
+    let raw = cfg.discord.assets.large_image.trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    if let Some(url) = normalize_image_ref(raw, cfg.discord.assets.prefer_https, false) {
+        return url;
+    }
+    raw.to_string()
+}
+
+/// Resolve small-image asset (HTTPS URL or portal key) + tooltip.
 ///
 /// Priority:
 /// 1. `[discord.assets].small_image` override (if non-empty)
-/// 2. VRChat running → `map.vrchat`
-/// 3. Preferred music player active → `map.<player>` / `map.kopuz`
-/// 4. `map.default` — or omit small image when unset / empty
-fn resolve_small_asset(cfg: &Config, state: &State, prefer: bool) -> (String, String) {
+/// 2. MPRIS `art_url` when https (or safe http→https) and music RP is ours
+///    (skipped in coexist-defer-to-Kopuz path — focused app still shown)
+/// 3. Focused window class → `map` / built-in aliases (HTTPS preferred)
+/// 4. VRChat running → `map.vrchat`
+/// 5. Preferred music player → `map.<player>` / `map.kopuz`
+/// 6. `map.default` — or omit when unset / empty
+fn resolve_small_asset(
+    cfg: &Config,
+    state: &State,
+    prefer: bool,
+    defer_music_rp: bool,
+) -> (String, String) {
     let assets = &cfg.discord.assets;
+    let prefer_https = assets.prefer_https;
+    let serve_local = assets.serve_local_art;
 
     if let Some(over) = &assets.small_image {
         let key = over.trim();
         if !key.is_empty() {
+            let resolved = normalize_image_ref(key, prefer_https, serve_local)
+                .unwrap_or_else(|| key.to_string());
             let text = assets
                 .small_text
                 .as_deref()
@@ -205,12 +233,52 @@ fn resolve_small_asset(cfg: &Config, state: &State, prefer: bool) -> (String, St
                 .filter(|s| !s.is_empty())
                 .unwrap_or("")
                 .to_string();
-            return (key.to_string(), text);
+            return (resolved, text);
+        }
+    }
+
+    // Album art when we own music presence (not coexist→Kopuz).
+    if !defer_music_rp {
+        if let Some(art) = state.art_url.as_deref() {
+            if let Some(url) = normalize_image_ref(art, prefer_https, serve_local) {
+                let text = assets
+                    .small_text
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        state
+                            .title
+                            .clone()
+                            .or_else(|| state.player.clone())
+                            .unwrap_or_else(|| "Now playing".into())
+                    });
+                return (url, text);
+            }
+        }
+    }
+
+    // Focused app (always eligible, including coexist).
+    if let Some(class) = state.focused_app.as_deref() {
+        if let Some(key) = resolve_app_asset(&assets.map, class, prefer_https) {
+            let text = assets
+                .small_text
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    state
+                        .focused_title
+                        .clone()
+                        .filter(|t| !t.is_empty())
+                        .unwrap_or_else(|| class.to_string())
+                });
+            // Truncate tooltip (Discord ~128)
+            let text = truncate_tooltip(&text);
+            return (key, text);
         }
     }
 
     if state.vrchat_running {
-        if let Some(key) = map_get(&assets.map, "vrchat") {
+        if let Some(key) = map_get_resolved(&assets.map, "vrchat", prefer_https) {
             let text = assets
                 .small_text
                 .clone()
@@ -222,7 +290,7 @@ fn resolve_small_asset(cfg: &Config, state: &State, prefer: bool) -> (String, St
 
     if prefer {
         if let Some(player) = &state.player {
-            if let Some(key) = map_get_for_player(&assets.map, player) {
+            if let Some(key) = map_get_for_player(&assets.map, player, prefer_https) {
                 let text = assets
                     .small_text
                     .clone()
@@ -233,7 +301,7 @@ fn resolve_small_asset(cfg: &Config, state: &State, prefer: bool) -> (String, St
         }
     }
 
-    if let Some(key) = map_get(&assets.map, "default") {
+    if let Some(key) = map_get_resolved(&assets.map, "default", prefer_https) {
         if !key.is_empty() {
             let text = assets
                 .small_text
@@ -245,6 +313,48 @@ fn resolve_small_asset(cfg: &Config, state: &State, prefer: bool) -> (String, St
     }
 
     (String::new(), String::new())
+}
+
+/// Normalize an image reference for Discord Assets.
+///
+/// - `https://…` → keep
+/// - `http://…` → upgrade to `https://` when `prefer_https` (same host/path)
+/// - `file://…` / other local → only if `serve_local` (still usually useless for Discord)
+/// - portal key / bare string → `None` here (caller uses as key), except we return None
+///   so callers can distinguish URL vs key via `is_https_url` / separate paths.
+///
+/// Returns `Some` only for network URLs Discord can fetch (or local when opted in).
+fn normalize_image_ref(raw: &str, prefer_https: bool, serve_local: bool) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with("https://") {
+        return Some(s.to_string());
+    }
+    if let Some(rest) = s.strip_prefix("http://") {
+        if prefer_https {
+            // Safe upgrade: same URL with https scheme (common for album CDNs).
+            return Some(format!("https://{rest}"));
+        }
+        return Some(s.to_string());
+    }
+    if s.starts_with("file://") || s.starts_with('/') {
+        if serve_local {
+            // Documented limitation: Discord CDN rarely can fetch 127.0.0.1.
+            // We do not start a loopback server unless/until verified; skip.
+            debug!(
+                path = s,
+                "serve_local_art enabled but loopback hosting is not active; skipping local art"
+            );
+        }
+        return None;
+    }
+    None
+}
+
+fn is_https_url(s: &str) -> bool {
+    s.trim().starts_with("https://")
 }
 
 fn map_get(map: &std::collections::HashMap<String, String>, logical: &str) -> Option<String> {
@@ -259,23 +369,112 @@ fn map_get(map: &std::collections::HashMap<String, String>, logical: &str) -> Op
         .map(|(_, v)| v.trim().to_string())
 }
 
+fn map_get_resolved(
+    map: &std::collections::HashMap<String, String>,
+    logical: &str,
+    prefer_https: bool,
+) -> Option<String> {
+    let raw = map_get(map, logical)?;
+    if let Some(url) = normalize_image_ref(&raw, prefer_https, false) {
+        return Some(url);
+    }
+    // Portal asset key
+    if prefer_https && is_https_url(&raw) {
+        return Some(raw);
+    }
+    Some(raw)
+}
+
+fn resolve_app_asset(
+    map: &std::collections::HashMap<String, String>,
+    class: &str,
+    prefer_https: bool,
+) -> Option<String> {
+    let normalized = normalize_class_key(class);
+    let lower = class.to_lowercase();
+    // Direct class / normalized lookup
+    for candidate in [class, normalized.as_str(), lower.as_str()] {
+        if let Some(v) = map_get_resolved(map, candidate, prefer_https) {
+            return Some(v);
+        }
+    }
+    // Aliases: VRChat, browsers, steam, …
+    for alias in class_aliases(class) {
+        if let Some(v) = map_get_resolved(map, alias, prefer_https) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn class_aliases(class: &str) -> Vec<&'static str> {
+    let c = class.to_lowercase();
+    let mut out = Vec::new();
+    if c.contains("vrchat") {
+        out.push("vrchat");
+    }
+    if c.contains("firefox") {
+        out.push("firefox");
+    }
+    if c.contains("chrom") || c == "google-chrome" || c == "brave-browser" || c == "helium" {
+        if c.contains("brave") {
+            out.push("brave-browser");
+        } else if c == "helium" {
+            out.push("helium");
+            out.push("chrome");
+        } else {
+            out.push("chrome");
+        }
+    }
+    if c.contains("steam") {
+        out.push("steam");
+    }
+    if c.contains("spotif") {
+        out.push("spotify");
+    }
+    if c == "code" || c.contains("code-url") || c.contains("codium") {
+        out.push("code");
+    }
+    if c.contains("discord") || c.contains("vesktop") || c.contains("equibop") {
+        if c.contains("equibop") {
+            out.push("equibop");
+        } else if c.contains("vesktop") {
+            out.push("vesktop");
+        } else {
+            out.push("discord");
+        }
+    }
+    out
+}
+
+fn normalize_class_key(class: &str) -> String {
+    class
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
+
 fn map_get_for_player(
     map: &std::collections::HashMap<String, String>,
     player: &str,
+    prefer_https: bool,
 ) -> Option<String> {
     let normalized = normalize_player_key(player);
-    if let Some(k) = map_get(map, &normalized) {
+    if let Some(k) = map_get_resolved(map, &normalized, prefer_https) {
         return Some(k);
     }
-    // Prefer known aliases when prefer_players matched Kopuz etc.
     for alias in ["kopuz", "equibop", "spotify", "vlc"] {
         if player.to_lowercase().contains(alias) {
-            if let Some(k) = map_get(map, alias) {
+            if let Some(k) = map_get_resolved(map, alias, prefer_https) {
                 return Some(k);
             }
         }
     }
-    map_get(map, player)
+    map_get_resolved(map, player, prefer_https)
 }
 
 fn normalize_player_key(player: &str) -> String {
@@ -287,6 +486,14 @@ fn normalize_player_key(player: &str) -> String {
         .collect::<String>()
         .trim_matches('_')
         .to_string()
+}
+
+fn truncate_tooltip(s: &str) -> String {
+    if s.chars().count() > 128 {
+        s.chars().take(125).collect::<String>() + "…"
+    } else {
+        s.to_string()
+    }
 }
 
 fn render_simple(tmpl: &str, state: &State, composed: &str, cfg: &Config) -> String {
@@ -362,14 +569,101 @@ mod tests {
     }
 
     #[test]
-    fn small_prefers_vrchat_when_running() {
+    fn large_keeps_portal_key() {
         let cfg = cfg_with_assets();
+        assert_eq!(resolve_large_asset(&cfg), "nixos");
+    }
+
+    #[test]
+    fn large_prefers_https_url() {
+        let mut cfg = cfg_with_assets();
+        cfg.discord.assets.large_image = "https://cdn.simpleicons.org/nixos/5277C3".into();
+        assert!(resolve_large_asset(&cfg).starts_with("https://"));
+    }
+
+    #[test]
+    fn small_prefers_https_art_url_when_music_ours() {
+        let cfg = cfg_with_assets();
+        let state = State {
+            art_url: Some("https://i.scdn.co/image/abc".into()),
+            title: Some("Song".into()),
+            player: Some("vlc".into()),
+            ..State::default()
+        };
+        let (key, _) = resolve_small_asset(&cfg, &state, false, false);
+        assert_eq!(key, "https://i.scdn.co/image/abc");
+    }
+
+    #[test]
+    fn small_upgrades_http_art_url() {
+        let cfg = cfg_with_assets();
+        let state = State {
+            art_url: Some("http://example.com/cover.png".into()),
+            title: Some("Song".into()),
+            ..State::default()
+        };
+        let (key, _) = resolve_small_asset(&cfg, &state, false, false);
+        assert_eq!(key, "https://example.com/cover.png");
+    }
+
+    #[test]
+    fn small_skips_file_art_by_default() {
+        let cfg = cfg_with_assets();
+        let state = State {
+            art_url: Some("file:///tmp/cover.png".into()),
+            title: Some("Song".into()),
+            focused_app: Some("firefox".into()),
+            ..State::default()
+        };
+        let (key, _) = resolve_small_asset(&cfg, &state, false, false);
+        assert!(key.starts_with("https://"), "got {key}");
+    }
+
+    #[test]
+    fn small_uses_focused_app_in_coexist_defer() {
+        let cfg = cfg_with_assets();
+        let state = State {
+            art_url: Some("https://i.scdn.co/image/abc".into()),
+            title: Some("Song".into()),
+            player: Some("Kopuz".into()),
+            focused_app: Some("firefox".into()),
+            focused_title: Some("MDN".into()),
+            ..State::default()
+        };
+        let (key, text) = resolve_small_asset(&cfg, &state, true, true);
+        assert!(key.starts_with("https://"), "got {key}");
+        assert!(key.contains("firefox") || key.contains("simpleicons"));
+        assert_eq!(text, "MDN");
+    }
+
+    #[test]
+    fn small_prefers_vrchat_when_running_no_focus_map() {
+        let mut cfg = cfg_with_assets();
+        // Empty focus path: no focused_app
+        cfg.discord.assets.map.retain(|k, _| {
+            !matches!(
+                k.as_str(),
+                "firefox"
+                    | "chrome"
+                    | "steam"
+                    | "helium"
+                    | "code"
+                    | "spotify"
+                    | "discord"
+                    | "vesktop"
+                    | "brave-browser"
+                    | "chromium"
+                    | "google-chrome"
+                    | "firefox-esr"
+                    | "code-url-handler"
+            )
+        });
         let state = State {
             vrchat_running: true,
             player: Some("Kopuz".into()),
             ..State::default()
         };
-        let (key, text) = resolve_small_asset(&cfg, &state, true);
+        let (key, text) = resolve_small_asset(&cfg, &state, true, false);
         assert_eq!(key, "vrchat");
         assert_eq!(text, "VRChat");
     }
@@ -381,7 +675,7 @@ mod tests {
             player: Some("Kopuz".into()),
             ..State::default()
         };
-        let (key, text) = resolve_small_asset(&cfg, &state, true);
+        let (key, text) = resolve_small_asset(&cfg, &state, true, false);
         assert_eq!(key, "kopuz");
         assert_eq!(text, "Kopuz");
     }
@@ -390,7 +684,7 @@ mod tests {
     fn small_falls_back_to_default_map() {
         let cfg = cfg_with_assets();
         let state = State::default();
-        let (key, text) = resolve_small_asset(&cfg, &state, false);
+        let (key, text) = resolve_small_asset(&cfg, &state, false, false);
         assert_eq!(key, "nixpresence");
         assert_eq!(text, "nixpresence");
     }
@@ -402,11 +696,21 @@ mod tests {
         cfg.discord.assets.small_text = Some("Equibop".into());
         let state = State {
             vrchat_running: true,
+            focused_app: Some("firefox".into()),
             ..State::default()
         };
-        let (key, text) = resolve_small_asset(&cfg, &state, false);
+        let (key, text) = resolve_small_asset(&cfg, &state, false, false);
         assert_eq!(key, "equibop");
         assert_eq!(text, "Equibop");
+    }
+
+    #[test]
+    fn small_override_https() {
+        let mut cfg = cfg_with_assets();
+        cfg.discord.assets.small_image = Some("https://cdn.simpleicons.org/nixos/5277C3".into());
+        let state = State::default();
+        let (key, _) = resolve_small_asset(&cfg, &state, false, false);
+        assert!(key.starts_with("https://"));
     }
 
     #[test]
@@ -414,7 +718,7 @@ mod tests {
         let mut cfg = cfg_with_assets();
         cfg.discord.assets.map = HashMap::new();
         let state = State::default();
-        let (key, text) = resolve_small_asset(&cfg, &state, false);
+        let (key, text) = resolve_small_asset(&cfg, &state, false, false);
         assert!(key.is_empty());
         assert!(text.is_empty());
     }
@@ -426,5 +730,15 @@ mod tests {
             normalize_player_key(" org.mpris.MediaPlayer2.kopuz "),
             "org_mpris_mediaplayer2_kopuz"
         );
+    }
+
+    #[test]
+    fn normalize_http_upgrade() {
+        assert_eq!(
+            normalize_image_ref("http://a.com/x.png", true, false).as_deref(),
+            Some("https://a.com/x.png")
+        );
+        assert!(normalize_image_ref("file:///tmp/x.png", true, false).is_none());
+        assert!(normalize_image_ref("nixos", true, false).is_none());
     }
 }
