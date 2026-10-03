@@ -97,7 +97,10 @@ impl Compositor {
 
         let mut out = format!("{}{}{}", cfg.general.prefix, joined, cfg.general.suffix);
         out = truncate_to_limit(&out, OSC_MAX_GRAPHEMES, &cfg.general.ellipsis);
+        // Redaction can grow the string ("neo" → "[user]", "zz" → "[redacted]").
+        // VRChat drops or clips /chatbox/input above 144 graphemes, so cut again.
         out = apply_privacy(&out, cfg, state);
+        out = truncate_to_limit(&out, OSC_MAX_GRAPHEMES, &cfg.general.ellipsis);
         self.last_output = out.clone();
         out
     }
@@ -153,5 +156,53 @@ mod tests {
         let out = c.compose(&cfg, &state);
         assert!(!out.is_empty() || true); // may be custom rotate page
         assert!(crate::util::grapheme_len(&out) <= OSC_MAX_GRAPHEMES);
+    }
+
+    #[test]
+    fn privacy_redaction_stays_within_osc_limit() {
+        use crate::config::{PageConfig, ProfileConfig, RotationConfig, RotationMode};
+
+        let mut cfg = Config::default();
+        cfg.privacy.hide_hostname = false;
+        cfg.privacy.hide_username = false;
+        cfg.privacy.hide_ip = false;
+        cfg.privacy.redact_custom_patterns = vec!["zz".into()];
+        cfg.general.prefix.clear();
+        cfg.general.suffix.clear();
+        cfg.general.ellipsis = "…".into();
+        // Exactly at the limit. Replacing "zz" with "[redacted]" grows past 144.
+        cfg.pages = vec![PageConfig {
+            name: "p".into(),
+            enabled: true,
+            template: format!("{}zz", "a".repeat(142)),
+            priority: 1,
+            interval_secs: None,
+        }];
+        cfg.profiles.clear();
+        cfg.general.active_profile = "default".into();
+        cfg.profiles.insert(
+            "default".into(),
+            ProfileConfig {
+                pages: vec!["p".into()],
+                rotation: Some(RotationConfig {
+                    mode: RotationMode::Static,
+                    interval_secs: 3600.0,
+                    pause_on_custom: false,
+                }),
+            },
+        );
+        let st = State {
+            active_profile: "default".into(),
+            ..State::default()
+        };
+        let mut c = Compositor::new();
+        let out = c.compose(&cfg, &st);
+        let n = crate::util::grapheme_len(&out);
+        assert!(n <= OSC_MAX_GRAPHEMES, "len={n} out={out}");
+        assert!(!out.contains("zz"), "pattern survived redaction: {out}");
+        assert!(
+            out.ends_with('…'),
+            "expected truncation after redaction grew the line: {out}"
+        );
     }
 }
