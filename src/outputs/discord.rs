@@ -92,13 +92,24 @@ impl DiscordOutput {
         let defer_music_rp =
             matches!(cfg.discord.music.mode, DiscordMusicMode::Coexist) && prefer && music_active;
 
+        // Defer: clear our activity so a preferred player's own RPC can show.
+        if matches!(cfg.discord.music.mode, DiscordMusicMode::Defer) && prefer {
+            if self.has_published_presence() {
+                debug!("discord.music=defer; clearing nixpresence activity for preferred player");
+                let cleared = clear_presence_if_deferring(
+                    self.client.as_mut(),
+                    &cfg.discord.music.mode,
+                    true,
+                );
+                debug_assert!(cleared);
+                self.reset_presence_cache();
+            }
+            return Ok(());
+        }
+
         match cfg.discord.music.mode {
             DiscordMusicMode::Coexist if prefer && music_active => {
                 debug!("discord.music=coexist; preferred player owns music RPC");
-            }
-            DiscordMusicMode::Defer if prefer => {
-                debug!("discord.music=defer; skipping Discord update");
-                return Ok(());
             }
             _ => {}
         }
@@ -192,9 +203,56 @@ impl DiscordOutput {
 
     pub fn clear(&mut self) {
         if let Some(c) = self.client.as_mut() {
-            let _ = c.clear_activity();
+            c.clear_presence();
         }
+        self.reset_presence_cache();
     }
+
+    fn reset_presence_cache(&mut self) {
+        self.last_details.clear();
+        self.last_state.clear();
+        self.last_large.clear();
+        self.last_large_text.clear();
+        self.last_small.clear();
+        self.last_small_text.clear();
+    }
+
+    fn has_published_presence(&self) -> bool {
+        !self.last_details.is_empty()
+            || !self.last_state.is_empty()
+            || !self.last_large.is_empty()
+            || !self.last_large_text.is_empty()
+            || !self.last_small.is_empty()
+            || !self.last_small_text.is_empty()
+    }
+}
+
+/// Testable clear surface for Discord activity (real IPC client or a fake).
+pub(crate) trait PresenceClear {
+    fn clear_presence(&mut self);
+}
+
+impl PresenceClear for DiscordIpcClient {
+    fn clear_presence(&mut self) {
+        let _ = DiscordIpc::clear_activity(self);
+    }
+}
+
+/// When music mode is `Defer` and a preferred player is active, clear our
+/// presence so the real player's RPC can show. Returns `true` if the caller
+/// must skip publishing.
+pub(crate) fn clear_presence_if_deferring<P: PresenceClear>(
+    publisher: Option<&mut P>,
+    mode: &DiscordMusicMode,
+    preferred_player_active: bool,
+) -> bool {
+    if !matches!(mode, DiscordMusicMode::Defer) || !preferred_player_active {
+        return false;
+    }
+    if let Some(p) = publisher {
+        p.clear_presence();
+    }
+    true
 }
 
 /// Large image: configured HTTPS URL (preferred) or portal asset key.
@@ -752,7 +810,7 @@ fn composed_without_music(composed: &str, state: &State) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{DiscordAssetsConfig, DiscordConfig, DiscordMusicConfig};
+    use crate::config::{DiscordAssetsConfig, DiscordConfig, DiscordMusicConfig, DiscordMusicMode};
     use std::collections::HashMap;
 
     fn cfg_with_assets() -> Config {
@@ -975,5 +1033,55 @@ mod tests {
         );
         assert!(normalize_image_ref("file:///tmp/x.png", true, false).is_none());
         assert!(normalize_image_ref("nixos", true, false).is_none());
+    }
+
+    #[derive(Default)]
+    struct FakePublisher {
+        clear_count: u32,
+    }
+
+    impl PresenceClear for FakePublisher {
+        fn clear_presence(&mut self) {
+            self.clear_count += 1;
+        }
+    }
+
+    #[test]
+    fn defer_clears_via_fake_publisher_when_preferred_player_active() {
+        let mut fake = FakePublisher::default();
+        let skip = clear_presence_if_deferring(Some(&mut fake), &DiscordMusicMode::Defer, true);
+        assert!(skip, "Defer + preferred player must skip publish");
+        assert_eq!(fake.clear_count, 1, "must clear nixpresence activity");
+    }
+
+    #[test]
+    fn defer_does_not_clear_when_preferred_player_inactive() {
+        let mut fake = FakePublisher::default();
+        let skip = clear_presence_if_deferring(Some(&mut fake), &DiscordMusicMode::Defer, false);
+        assert!(!skip);
+        assert_eq!(fake.clear_count, 0);
+    }
+
+    #[test]
+    fn coexist_does_not_clear_when_preferred_player_active() {
+        let mut fake = FakePublisher::default();
+        let skip = clear_presence_if_deferring(Some(&mut fake), &DiscordMusicMode::Coexist, true);
+        assert!(!skip);
+        assert_eq!(fake.clear_count, 0);
+    }
+
+    #[test]
+    fn takeover_does_not_clear_when_preferred_player_active() {
+        let mut fake = FakePublisher::default();
+        let skip = clear_presence_if_deferring(Some(&mut fake), &DiscordMusicMode::Takeover, true);
+        assert!(!skip);
+        assert_eq!(fake.clear_count, 0);
+    }
+
+    #[test]
+    fn defer_still_skips_publish_with_no_publisher() {
+        let skip =
+            clear_presence_if_deferring(None::<&mut FakePublisher>, &DiscordMusicMode::Defer, true);
+        assert!(skip);
     }
 }

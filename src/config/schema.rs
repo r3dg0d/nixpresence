@@ -532,7 +532,7 @@ pub enum DiscordMusicMode {
     Coexist,
     /// Clear and take over music presence.
     Takeover,
-    /// Disable Discord output entirely when a preferred music player is active.
+    /// Clear nixpresence Discord activity when a preferred music player is active.
     Defer,
 }
 

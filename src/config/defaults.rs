@@ -101,7 +101,7 @@ state_template = "{os} · {gpu_name}"
 [discord.music]
 # coexist  = do not publish music when Kopuz (or prefer_players) owns Discord RPC
 # takeover = nixpresence publishes music presence
-# defer    = disable Discord output while preferred player is active
+# defer    = clear our Discord activity while preferred player is active
 mode = "coexist"
 prefer_players = ["Kopuz", "kopuz"]
 
